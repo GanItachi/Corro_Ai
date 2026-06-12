@@ -1,0 +1,53 @@
+LE GBAKI — bibliothèque partagée de PDFs (cours, TDs, anciens sujets)
+embarquée dans le site.
+
+CONCEPT : le Gbaki est une bibliothèque READ-ONLY de PDFs committée en
+git. Tout le monde la voit. Quand un utilisateur clique « Ouvrir » sur
+un item, l'app :
+  1) télécharge le PDF côté navigateur,
+  2) lance l'OCR (gratuit si le PDF a une couche texte native),
+  3) sauvegarde le résultat dans LA BASE PERSO de cet utilisateur
+     (IndexedDB, propre à son navigateur).
+
+Les ouvertures suivantes du même item sont instantanées depuis sa base
+perso. Chaque utilisateur a sa propre version éditée — le Gbaki ne
+stocke que les PDFs sources, jamais les transcriptions.
+
+
+COMMENT AJOUTER UN DOCUMENT AU GBAKI (déploiement) :
+
+1. Place le PDF, rangé par matière, ex. :
+     public/gbaki/analyse1/devoir1.pdf
+     public/gbaki/statistiques/examen-2023.pdf
+
+2. Déclare-le dans index.json en ajoutant un objet au tableau "items" :
+   {
+     "id": "stat-exam-2023",            <- identifiant unique
+     "titre": "Examen de Statistiques", <- affiché sur le site
+     "matiere": "Statistiques",         <- sert au regroupement
+     "type": "examen",                  <- "cours" | "td" | "examen"
+     "annee": "2022-2023",
+     "pdf": "/gbaki/statistiques/examen-2023.pdf"
+   }
+   Attention à la virgule entre les objets, et garde un JSON valide.
+
+3. git commit && git push -> Vercel redéploie, l'item est dispo pour
+   tout le monde.
+
+
+LA BASE PERSO (IndexedDB) :
+
+- Stockée dans le navigateur de chaque utilisateur (anonyme, sans compte).
+- Plusieurs centaines de Mo dispos — largement assez pour des années
+  de cours, TDs et examens.
+- Conserve : la transcription Markdown, les images de pages sources,
+  les métadonnées (matière, type, année, thème auto-détecté).
+- Pour partager entre machines : bouton « Exporter ma base » (à venir)
+  qui produit un .zip à ré-importer sur un autre appareil.
+- Si l'utilisateur efface les données du site, sa base est perdue.
+
+
+L'ANALYSE DE PROF : coche au moins 2 examens d'un même prof dans le
+Gbaki ou dans ta base perso. Si certains ne sont pas encore transcrits,
+l'app demande confirmation puis les OCRise en série avant d'assembler
+le prompt d'analyse.

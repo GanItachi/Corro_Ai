@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "id": "ana1-cours",
+      "titre": "Cours d'Analyse 1",
+      "matiere": "Analyse 1",
+      "type": "cours",
+      "annee": "2020-2021",
+      "pdf": "/gbaki/analyse1/cours.pdf"
+    }
+  ]
+}

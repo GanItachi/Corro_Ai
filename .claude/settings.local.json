@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node \"C:\\\\Users\\\\HP PAVILION\\\\Downloads\\\\pdf-ocr-ia\\\\scripts\\\\copy-pdf-worker.mjs\")",
+      "Bash(npx next *)",
+      "PowerShell($gbaki = \"C:\\\\Users\\\\HP PAVILION\\\\Downloads\\\\pdf-ocr-ia\\\\public\\\\gbaki\"; Rename-Item -Path \"$gbaki\\\\algebre1\" -NewName \"analyse1\"; Rename-Item -Path \"$gbaki\\\\analyse1\\\\Cours Analyse 1.pdf\" -NewName \"cours.pdf\"; Remove-Item -Path \"$gbaki\\\\analyse1\\\\cours.md\"; Get-ChildItem -Recurse $gbaki | Select-Object -ExpandProperty FullName)",
+      "Bash(npm install *)"
+    ]
+  }
+}
