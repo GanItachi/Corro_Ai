@@ -903,33 +903,41 @@ export default function Home() {
   }
 
   function buildBatches(allPages) {
-    const batches = [];
-    let cur = [],
-      curSize = 0;
-    for (const p of allPages) {
-      if (p.kind === "text") {
-        if (cur.length) {
+      const batches = [];
+      let cur = [],
+        curSize = 0;
+  
+      for (const p of allPages) {
+        if (p.kind === "text") {
+          if (cur.length) {
+            batches.push({ kind: "ocr", pages: cur });
+            cur = [];
+            curSize = 0;
+          }
+          batches.push({ kind: "text", page: p });
+          continue;
+        }
+  
+        // CALCUL SÉCURISÉ : On estime le poids de l'objet JSON global (images + structure)
+        // On convertit la limite Vercel de 4.5 Mo en sécurité stricte (~3.5 Mo max par lot)
+        const estimatedPageSize = p.dataUrl ? p.dataUrl.length : 0;
+  
+        if (
+          cur.length &&
+          (cur.length >= BATCH_SIZE || curSize + estimatedPageSize > 3_500_000)
+        ) {
           batches.push({ kind: "ocr", pages: cur });
           cur = [];
           curSize = 0;
         }
-        batches.push({ kind: "text", page: p });
-        continue;
+        
+        cur.push(p);
+        curSize += estimatedPageSize;
       }
-      if (
-        cur.length &&
-        (cur.length >= BATCH_SIZE || curSize + p.dataUrl.length > MAX_PAYLOAD)
-      ) {
-        batches.push({ kind: "ocr", pages: cur });
-        cur = [];
-        curSize = 0;
-      }
-      cur.push(p);
-      curSize += p.dataUrl.length;
+      
+      if (cur.length) batches.push({ kind: "ocr", pages: cur });
+      return batches;
     }
-    if (cur.length) batches.push({ kind: "ocr", pages: cur });
-    return batches;
-  }
 
   async function processFiles(files, opts = {}) {
     if (!files || files.length === 0) return null;
