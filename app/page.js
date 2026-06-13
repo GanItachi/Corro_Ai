@@ -1,9 +1,5 @@
 "use client";
 
-// Corro AI — atelier de prép d'examen.
-// Base perso (IndexedDB) + Gbaki partagé. Auto-classify post-OCR.
-// Outils d'étude : analyse de prof, ranker TDs, plan de révision.
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import Dropzone from "../components/Dropzone";
@@ -31,7 +27,11 @@ import {
   buildRevisionPlanPrompt,
   buildQuizExportPrompt,
 } from "../lib/prompts";
-import { exportBaseAsZip, importBaseFromZip, downloadBlob } from "../lib/export";
+import {
+  exportBaseAsZip,
+  importBaseFromZip,
+  downloadBlob,
+} from "../lib/export";
 import {
   collectFromDataTransfer,
   collectFromFileList,
@@ -51,13 +51,10 @@ import {
 import { classifyDocument, quizQuestion, quizEvaluate } from "../lib/ai";
 
 const QUIZ_TOTAL = 8;
-
 const BATCH_SIZE = 2;
 const DELAY_MS = 4500;
 const MAX_PAYLOAD = 3_000_000;
 const OCR_CHAIN = ["gemini", "gemini-lite", "groq", "openrouter"];
-
-const FRIENDLY_BATCH_LABELS = ["On déchiffre", "On transcrit", "On lit", "On note"];
 const normalizeType = (t) => (t === "sujet" ? "examen" : t);
 
 function sleep(ms, signal) {
@@ -100,72 +97,60 @@ async function migrateLegacyCache(gbakiManifest) {
         n++;
       }
       localStorage.removeItem(k);
-    } catch { /* on continue */ }
+    } catch {
+      /* on continue */
+    }
   }
   return n;
 }
 
 export default function Home() {
-  // --- Persisté ---
   const [subject, setSubject] = useState(
-    "mathématiques avancées, statistiques et économie"
+    "mathématiques avancées, statistiques et économie",
   );
   const [attempt, setAttempt] = useState("");
-  const [sel, setSel] = useState([]); // string[] préfixés "gbaki:" ou "base:"
+  const [sel, setSel] = useState([]);
   const [currentItemId, setCurrentItemId] = useState(null);
   const [hydrated, setHydrated] = useState(false);
-
-  // --- Workbench ---
   const [markdown, setMarkdown] = useState("");
   const [sourceImages, setSourceImages] = useState([]);
-
-  // --- Transient ---
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
   const [verifyPass, setVerifyPass] = useState(true);
   const [autoVerifyDisabled, setAutoVerifyDisabled] = useState(false);
-
-  // --- Gbaki + base ---
   const [gbaki, setGbaki] = useState(null);
   const [baseItems, setBaseItems] = useState([]);
   const [studyPrompt, setStudyPrompt] = useState("");
   const [studyToolLabel, setStudyToolLabel] = useState("");
   const [gbakiStatus, setGbakiStatus] = useState("");
-
-  // --- Modales ---
   const [addModal, setAddModal] = useState(null);
   const [editModal, setEditModal] = useState(null);
-
-  // --- Quiz interactif ---
   const [quiz, setQuiz] = useState(null);
-
-  // --- Batch import + help ---
-  const [batchModal, setBatchModal] = useState(null); // { matiere, items, counts, rootDetected }
+  const [batchModal, setBatchModal] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null);
-  const [batchSummary, setBatchSummary] = useState(null); // { ok, failed, matiere, verifyPass }
+  const [batchSummary, setBatchSummary] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
-
-  // Dernier item ouvert (pour "Reprendre" sur le dashboard). Persisté.
   const [lastOpenedItemId, setLastOpenedItemId] = useState(null);
-
-  // Clés utilisateur (BYOK). Chargées au boot, rechargées après save dans Settings.
-  const [userKeys, setUserKeysState] = useState({ gemini: "", groq: "", openrouter: "" });
+  const [userKeys, setUserKeysState] = useState({
+    gemini: "",
+    groq: "",
+    openrouter: "",
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState(null);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [saturatedShared, setSaturatedShared] = useState(false);
+  const [copied, setCopied] = useState("");
+
+  const abortRef = useRef(null);
+  const count429 = useRef(0);
+  const lastErrorRef = useRef("");
 
   async function reloadKeys() {
     const k = await getUserKeys();
     setUserKeysState(k);
   }
-
-  const [copied, setCopied] = useState("");
-
-  const abortRef = useRef(null);
-  const count429 = useRef(0);
-  const lastErrorRef = useRef(""); // pour capter la raison d'échec dans processFiles
 
   const matiereSuggestions = useMemo(() => {
     const set = new Set();
@@ -176,21 +161,19 @@ export default function Home() {
 
   const currentItem = useMemo(
     () => baseItems.find((it) => it.id === currentItemId) || null,
-    [baseItems, currentItemId]
+    [baseItems, currentItemId],
   );
 
-  // Hydratation au mount.
   useEffect(() => {
     (async () => {
       const s = loadState();
       if (typeof s.subject === "string" && s.subject) setSubject(s.subject);
       if (typeof s.attempt === "string") setAttempt(s.attempt);
       if (Array.isArray(s.sel)) {
-        // Migration : ancien format = ids gbaki bruts. On préfixe en gbaki: .
         setSel(
           s.sel
             .filter((id) => typeof id === "string" && id)
-            .map((id) => (id.includes(":") ? id : `gbaki:${id}`))
+            .map((id) => (id.includes(":") ? id : `gbaki:${id}`)),
         );
       }
       if (typeof s.currentItemId === "string") {
@@ -211,7 +194,6 @@ export default function Home() {
     })();
   }, []);
 
-  // Manifeste Gbaki + migration + base.
   useEffect(() => {
     (async () => {
       try {
@@ -219,11 +201,7 @@ export default function Home() {
         const d = r.ok ? await r.json() : { items: [] };
         const items = Array.isArray(d.items) ? d.items : [];
         setGbaki(items);
-
-        const migrated = await migrateLegacyCache(items);
-        if (migrated > 0) {
-          console.log(`[corro] migré ${migrated} item(s) du vieux cache vers la base`);
-        }
+        await migrateLegacyCache(items);
         setBaseItems(await listItems());
       } catch {
         setGbaki([]);
@@ -231,7 +209,6 @@ export default function Home() {
     })();
   }, []);
 
-  // Auto-save debouncé. Sauve dans l'item courant + état général.
   useEffect(() => {
     if (!hydrated || busy) return;
     const t = setTimeout(async () => {
@@ -242,16 +219,23 @@ export default function Home() {
       }
     }, 800);
     return () => clearTimeout(t);
-  }, [markdown, subject, attempt, sel, currentItemId, sourceImages, hydrated, busy]);
+  }, [
+    markdown,
+    subject,
+    attempt,
+    sel,
+    currentItemId,
+    sourceImages,
+    hydrated,
+    busy,
+  ]);
 
   function toggleSel(sid) {
     setSel((s) => (s.includes(sid) ? s.filter((x) => x !== sid) : [...s, sid]));
   }
-
   function clearSelection() {
     setSel([]);
   }
-
   function cancelOcr() {
     abortRef.current?.abort();
   }
@@ -260,32 +244,33 @@ export default function Home() {
     setBaseItems(await listItems());
   }
 
-  /* ============ Folder / zip drop (batch matière) ============ */
   async function handleFolderOrZip(source) {
     try {
       let entries = [];
       if (source.zipFile) {
-        setGbakiStatus("Lecture du .zip…");
+        setGbakiStatus("Lecture du dossier…");
         entries = await collectFromZip(source.zipFile);
       } else if (source.fileList) {
         entries = collectFromFileList(source.fileList);
       } else if (source.dataTransfer) {
         entries = await collectFromDataTransfer(source.dataTransfer);
-        // Si parmi les entries il y a un .zip seul, on l'extrait.
-        if (entries.length === 1 && /\.zip$/i.test(entries[0].file?.name || "")) {
-          setGbakiStatus("Lecture du .zip…");
+        if (
+          entries.length === 1 &&
+          /\.zip$/i.test(entries[0].file?.name || "")
+        ) {
+          setGbakiStatus("Lecture du dossier…");
           entries = await collectFromZip(entries[0].file);
         }
       }
       const parsed = parseFolderStructure(entries);
       if (!parsed || parsed.items.length === 0) {
-        setGbakiStatus("Aucun PDF ou image trouvé dans ce dépôt.");
+        setGbakiStatus("Aucun document trouvé.");
         return;
       }
       setGbakiStatus("");
       setBatchModal(parsed);
     } catch (e) {
-      setGbakiStatus(`Erreur lecture : ${e.message || e}`);
+      setGbakiStatus(`Erreur : ${e.message || e}`);
     }
   }
 
@@ -307,13 +292,12 @@ export default function Home() {
 
     for (let i = 0; i < items.length; i++) {
       if (controller.signal.aborted) {
-        // Toutes les non-traitées comptent comme "annulées".
         for (let j = i; j < items.length; j++) {
           failed.push({
             titre: items[j].titre,
             type: items[j].type,
             file: items[j].file,
-            reason: "Annulé avant traitement",
+            reason: "Annulé",
           });
         }
         break;
@@ -324,7 +308,6 @@ export default function Home() {
         current: i + 1,
         currentTitle: `${it.titre} (${it.type})`,
       }));
-
       const draft = await addItem({
         matiere,
         type: it.type,
@@ -357,7 +340,7 @@ export default function Home() {
           titre: it.titre,
           type: it.type,
           file: it.file,
-          reason: lastErrorRef.current || "Erreur inconnue",
+          reason: lastErrorRef.current || "Erreur",
         });
         setBatchProgress((p) => ({ ...p, failed: p.failed + 1 }));
         if (controller.signal.aborted) {
@@ -366,7 +349,7 @@ export default function Home() {
               titre: items[j].titre,
               type: items[j].type,
               file: items[j].file,
-              reason: "Annulé avant traitement",
+              reason: "Annulé",
             });
           }
           break;
@@ -381,12 +364,10 @@ export default function Home() {
     setMarkdown("");
     setSourceImages([]);
     setStatus(
-      `Batch terminé : ${okCount} OK${failed.length > 0 ? ` · ${failed.length} échec(s)` : ""}.`
+      `${okCount} document(s) ajouté(s)${failed.length > 0 ? ` · ${failed.length} échec(s)` : ""}.`,
     );
-
-    if (failed.length > 0) {
+    if (failed.length > 0)
       setBatchSummary({ ok: okCount, failed, matiere, verifyPass: vp });
-    }
   }
 
   function cancelBatch() {
@@ -394,13 +375,12 @@ export default function Home() {
   }
 
   async function retryBatchFailed(itemsToRetry) {
-    if (!batchSummary || !itemsToRetry || itemsToRetry.length === 0) return;
+    if (!batchSummary || !itemsToRetry?.length) return;
     const { matiere, verifyPass: vp } = batchSummary;
     setBatchSummary(null);
     await confirmBatch({ matiere, items: itemsToRetry, verifyPass: vp });
   }
 
-  /* ============ Dropzone (upload local) ============ */
   function handleFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
@@ -419,7 +399,6 @@ export default function Home() {
     });
   }
 
-  /* ============ Gbaki : import + ouverture ============ */
   async function openGbakiItem(manifestItem) {
     if (busy) return;
     const existing = await findByGbakiRef(manifestItem.id);
@@ -428,9 +407,9 @@ export default function Home() {
       return;
     }
     try {
-      setGbakiStatus(`Téléchargement de « ${manifestItem.titre} »…`);
+      setGbakiStatus(`Chargement de « ${manifestItem.titre} »…`);
       const r = await fetch(manifestItem.pdf);
-      if (!r.ok) throw new Error(`PDF introuvable : ${manifestItem.pdf}`);
+      if (!r.ok) throw new Error(`Document introuvable.`);
       const blob = await r.blob();
       const file = new File([blob], `${manifestItem.titre}.pdf`, {
         type: "application/pdf",
@@ -452,31 +431,31 @@ export default function Home() {
     }
   }
 
-  /* ============ Confirmation du modal d'ajout ============ */
   async function confirmAdd(meta) {
     const { titre, matiere, type, annee, pageFrom, pageTo } = meta;
     const allFiles = addModal.allFiles;
     const gbakiRef = addModal.gbakiManifestItem?.id || null;
     const source = gbakiRef ? "gbaki" : "upload";
     setAddModal(null);
-
     const draft = await addItem({
-      matiere, type, titre, annee,
-      source, gbakiRef,
+      matiere,
+      type,
+      titre,
+      annee,
+      source,
+      gbakiRef,
     });
     setCurrentItemId(draft.id);
     await refreshBase();
-
-    const pageRange = { from: pageFrom, to: pageTo };
-    const result = await processFiles(allFiles, { pageRange });
+    const result = await processFiles(allFiles, {
+      pageRange: { from: pageFrom, to: pageTo },
+    });
     if (result?.markdown) {
       await updateItem(draft.id, {
         markdown: result.markdown,
         sourceImages: result.sourceImages,
       });
       await refreshBase();
-
-      // Auto-classify en arrière-plan (n'attend pas pour libérer l'UI).
       classifyDocument(result.markdown).then(async (cls) => {
         if (!cls) return;
         const cur = await getItem(draft.id);
@@ -485,17 +464,14 @@ export default function Home() {
         if (
           cls.matiere &&
           (cur.matiere === "Sans matière" || !cur.matiere.trim())
-        ) {
+        )
           updates.matiere = cls.matiere;
-        }
         if (cls.theme && !cur.theme) updates.theme = cls.theme;
         if (Object.keys(updates).length > 0) {
           await updateItem(draft.id, updates);
           await refreshBase();
           setStatus(
-            `Auto-détection : ${cls.matiere ? `matière "${cls.matiere}"` : ""}${
-              cls.matiere && cls.theme ? " · " : ""
-            }${cls.theme ? `thème "${cls.theme}"` : ""}`
+            `Détecté : ${[cls.matiere, cls.theme].filter(Boolean).join(" · ")}`,
           );
         }
       });
@@ -512,7 +488,6 @@ export default function Home() {
     setAddModal(null);
   }
 
-  /* ============ Base : ouvrir / éditer / supprimer / re-OCRiser ============ */
   async function openBaseItem(item) {
     if (busy) return;
     setCurrentItemId(item.id);
@@ -520,7 +495,7 @@ export default function Home() {
     setMarkdown(item.markdown || "");
     setSourceImages(item.sourceImages || []);
     setProgress(1);
-    setStatus(`« ${item.titre} » — chargé.`);
+    setStatus(`« ${item.titre} » ouvert.`);
   }
 
   function editBaseItem(item) {
@@ -537,7 +512,7 @@ export default function Home() {
   async function deleteBaseItem(item) {
     if (
       !window.confirm(
-        `Supprimer « ${item.titre} » de ta base ?\n\nDéfinitif.`
+        `Supprimer « ${item.titre} » ?\n\nCette action est définitive.`,
       )
     )
       return;
@@ -549,7 +524,6 @@ export default function Home() {
       setStatus("");
     }
     if (lastOpenedItemId === item.id) setLastOpenedItemId(null);
-    // Nettoie aussi de la sélection si présent.
     setSel((s) => s.filter((sid) => sid !== `base:${item.id}`));
     await refreshBase();
   }
@@ -565,13 +539,13 @@ export default function Home() {
     if (busy || !item.gbakiRef) return;
     if (
       !window.confirm(
-        `Re-OCRiser « ${item.titre} » ?\n\nTes corrections sur cet item seront perdues.`
+        `Retranscrire « ${item.titre} » ?\n\nTes modifications seront perdues.`,
       )
     )
       return;
     const manifestItem = (gbaki || []).find((g) => g.id === item.gbakiRef);
     if (!manifestItem) {
-      setGbakiStatus("L'entrée Gbaki d'origine n'existe plus dans le manifeste.");
+      setGbakiStatus("Document source introuvable.");
       return;
     }
     await deleteItem(item.id);
@@ -597,16 +571,14 @@ export default function Home() {
     setMarkdown(text);
     setStatus(
       currentItemId
-        ? "Transcription importée — sauvegardée dans l'item courant."
-        : "Pour importer un .md, ouvre d'abord un item ou crée-en un via un drop."
+        ? "Transcription importée."
+        : "Ouvre d'abord un document pour importer un .md.",
     );
   }
 
-  /* ============ Sélection → items (avec auto-OCR des manquants) ============ */
   async function prepareSelection() {
     const items = [];
     const missing = [];
-
     for (const sid of sel) {
       if (sid.startsWith("base:")) {
         const id = sid.slice(5);
@@ -623,21 +595,21 @@ export default function Home() {
         }
       }
     }
-
     if (missing.length > 0) {
       const proceed = window.confirm(
-        `${missing.length} document(s) à transcrire d'abord (OCR séquentiel). Continuer ?`
+        `${missing.length} document(s) à transcrire avant de continuer.`,
       );
       if (!proceed) return null;
-
       for (let i = 0; i < missing.length; i++) {
         const m = missing[i];
-        setGbakiStatus(`OCR ${i + 1}/${missing.length} : ${m.titre}`);
+        setGbakiStatus(`Transcription ${i + 1}/${missing.length} : ${m.titre}`);
         try {
           const r = await fetch(m.pdf);
-          if (!r.ok) throw new Error(`PDF introuvable : ${m.pdf}`);
+          if (!r.ok) throw new Error(`Document introuvable.`);
           const blob = await r.blob();
-          const file = new File([blob], `${m.titre}.pdf`, { type: "application/pdf" });
+          const file = new File([blob], `${m.titre}.pdf`, {
+            type: "application/pdf",
+          });
           const draft = await addItem({
             matiere: m.matiere,
             type: normalizeType(m.type),
@@ -650,7 +622,7 @@ export default function Home() {
           const result = await processFiles([file]);
           if (!result?.markdown) {
             await deleteItem(draft.id);
-            setGbakiStatus(`OCR interrompu sur « ${m.titre} ».`);
+            setGbakiStatus(`Échec sur « ${m.titre} ».`);
             await refreshBase();
             return null;
           }
@@ -660,24 +632,22 @@ export default function Home() {
           });
           items.push(await getItem(draft.id));
         } catch (e) {
-          setGbakiStatus(`Erreur sur « ${m.titre} » : ${e.message || e}`);
+          setGbakiStatus(`Erreur : ${e.message || e}`);
           return null;
         }
       }
       await refreshBase();
       setGbakiStatus("");
     }
-
     return items;
   }
 
-  /* ============ Tools (acceptent items optionnels pour Dashboard) ============ */
   async function analyzeProf(itemsArg) {
     const items = Array.isArray(itemsArg) ? itemsArg : await prepareSelection();
     if (!items) return;
     const examens = items.filter((it) => normalizeType(it.type) === "examen");
     if (examens.length < 2) {
-      setGbakiStatus("Il faut au moins 2 examens pour l'analyse de prof.");
+      setGbakiStatus("Il faut au moins 2 examens.");
       return;
     }
     const matieres = new Set(examens.map((it) => it.matiere));
@@ -690,7 +660,9 @@ export default function Home() {
       markdown: it.markdown,
     }));
     setStudyPrompt(
-      buildProfAnalysisPrompt(docs, { matiere: [...matieres][0] || "la matière" })
+      buildProfAnalysisPrompt(docs, {
+        matiere: [...matieres][0] || "la matière",
+      }),
     );
     setStudyToolLabel("analyse-prof");
     setGbakiStatus("");
@@ -702,12 +674,12 @@ export default function Home() {
     const tds = items.filter((it) => normalizeType(it.type) === "td");
     const exams = items.filter((it) => normalizeType(it.type) === "examen");
     if (tds.length < 1 || exams.length < 1) {
-      setGbakiStatus("Il faut au moins 1 TD et 1 examen pour le ranking.");
+      setGbakiStatus("Il faut au moins 1 TD et 1 examen.");
       return;
     }
     const matieres = new Set(items.map((it) => it.matiere));
     if (matieres.size > 1) {
-      setGbakiStatus("Tous les items doivent être de la même matière.");
+      setGbakiStatus("Tous les documents doivent être de la même matière.");
       return;
     }
     const tdsDoc = tds.map((it) => ({
@@ -722,19 +694,18 @@ export default function Home() {
     setStudyPrompt(
       buildTdsRankingPrompt(tdsDoc, examsDoc, {
         matiere: [...matieres][0] || "la matière",
-      })
+      }),
     );
     setStudyToolLabel("ranker-tds");
     setGbakiStatus("");
   }
 
-  /* ============ Quiz interactif Gemini ============ */
   async function startQuiz(itemsArg) {
     const items = Array.isArray(itemsArg) ? itemsArg : await prepareSelection();
     if (!items) return;
     const cours = items.filter((it) => normalizeType(it.type) === "cours");
     if (cours.length === 0) {
-      setGbakiStatus("Sélectionne au moins un cours pour le quiz.");
+      setGbakiStatus("Sélectionne au moins un cours.");
       return;
     }
     const matieres = new Set(cours.map((it) => it.matiere));
@@ -744,13 +715,13 @@ export default function Home() {
     }
     const matiere = [...matieres][0] || "la matière";
     const coursText = cours
-      .map((c) => (cours.length > 1 ? `# ${c.titre}\n\n${c.markdown}` : c.markdown))
+      .map((c) =>
+        cours.length > 1 ? `# ${c.titre}\n\n${c.markdown}` : c.markdown,
+      )
       .join("\n\n---\n\n");
-
     setStudyPrompt("");
     setStudyToolLabel("");
     setGbakiStatus("");
-
     const init = {
       cours: coursText,
       matiere,
@@ -760,7 +731,6 @@ export default function Home() {
       status: "loading",
     };
     setQuiz(init);
-
     const q = await quizQuestion({ cours: coursText, matiere, history: [] });
     if (q?.error || !q?.question) {
       setGbakiStatus(`Quiz indisponible : ${q?.error || "réponse invalide"}.`);
@@ -781,7 +751,7 @@ export default function Home() {
       ...s,
       status: "evaluating",
       questions: s.questions.map((q, i) =>
-        i === idx ? { ...q, userAnswer } : q
+        i === idx ? { ...q, userAnswer } : q,
       ),
     }));
     const cq = quiz.questions[idx];
@@ -792,9 +762,8 @@ export default function Home() {
       userAnswer,
     });
     if (ev?.error || !ev?.kind) {
-      // Échec d'évaluation : on remet l'utilisateur en mode answer pour réessayer.
       setQuiz((s) => ({ ...s, status: "asking" }));
-      setGbakiStatus(`Évaluation impossible : ${ev?.error || "réponse invalide"}.`);
+      setGbakiStatus(`Correction impossible. Réessaie.`);
       return;
     }
     setQuiz((s) => ({
@@ -809,7 +778,7 @@ export default function Home() {
               feedback: String(ev.feedback || ""),
               ideal: String(ev.ideal || ""),
             }
-          : q
+          : q,
       ),
     }));
   }
@@ -828,7 +797,6 @@ export default function Home() {
       history: quiz.questions,
     });
     if (q?.error || !q?.question) {
-      // Si on n'arrive plus à générer, on termine prématurément avec ce qu'on a.
       setQuiz((s) => ({ ...s, status: "done" }));
       return;
     }
@@ -840,40 +808,39 @@ export default function Home() {
   }
 
   function restartQuiz() {
-    // Recommence avec la même sélection.
     startQuiz();
   }
-
   function exitQuiz() {
     setQuiz(null);
   }
 
-  /* ============ Dashboard : action sur une matière ============ */
   async function onMatiereAction(matiere, action) {
     const items = baseItems.filter(
-      (it) => it.matiere === matiere && (it.markdown || "").trim()
+      (it) => it.matiere === matiere && (it.markdown || "").trim(),
     );
     if (items.length === 0) {
-      setGbakiStatus(`Aucun item transcrit pour « ${matiere} ».`);
+      setGbakiStatus(`Aucun document transcrit pour « ${matiere} ».`);
       return;
     }
     switch (action) {
-      case "analyzeProf": return analyzeProf(items);
-      case "rankTds":     return rankTds(items);
-      case "plan":        return planRevision("", items);
-      case "quiz":        return startQuiz(items);
-      default: return;
+      case "analyzeProf":
+        return analyzeProf(items);
+      case "rankTds":
+        return rankTds(items);
+      case "plan":
+        return planRevision("", items);
+      case "quiz":
+        return startQuiz(items);
     }
   }
 
-  /* ============ Export / import base ============ */
   async function handleExport() {
     try {
-      setGbakiStatus("Préparation de l'archive…");
+      setGbakiStatus("Préparation de l'export…");
       const blob = await exportBaseAsZip();
       const date = new Date().toISOString().slice(0, 10);
-      downloadBlob(blob, `corro-base-${date}.zip`);
-      setGbakiStatus(`Export terminé (${(blob.size / 1024).toFixed(0)} Ko).`);
+      downloadBlob(blob, `corro-${date}.zip`);
+      setGbakiStatus(`Export prêt (${(blob.size / 1024).toFixed(0)} Ko).`);
     } catch (e) {
       setGbakiStatus(`Export : ${e.message || e}`);
     }
@@ -882,12 +849,12 @@ export default function Home() {
   async function handleImport(file) {
     if (!file) return;
     try {
-      setGbakiStatus(`Import de ${file.name}…`);
+      setGbakiStatus(`Import en cours…`);
       const res = await importBaseFromZip(file);
       await refreshBase();
-      const parts = [];
-      parts.push(`${res.added} item(s) importé(s)`);
-      if (res.skippedExisting > 0) parts.push(`${res.skippedExisting} déjà présent(s)`);
+      const parts = [`${res.added} document(s) importé(s)`];
+      if (res.skippedExisting > 0)
+        parts.push(`${res.skippedExisting} déjà présent(s)`);
       if (res.skippedMissingFile > 0)
         parts.push(`${res.skippedMissingFile} fichier(s) manquant(s)`);
       setGbakiStatus(parts.join(" · "));
@@ -911,12 +878,12 @@ export default function Home() {
     const items = Array.isArray(itemsArg) ? itemsArg : await prepareSelection();
     if (!items) return;
     if (items.length === 0) {
-      setGbakiStatus("Sélectionne au moins un item.");
+      setGbakiStatus("Sélectionne au moins un document.");
       return;
     }
     const matieres = new Set(items.map((it) => it.matiere));
     if (matieres.size > 1) {
-      setGbakiStatus("Tous les items doivent être de la même matière.");
+      setGbakiStatus("Tous les documents doivent être de la même matière.");
       return;
     }
     const docs = items.map((it) => ({
@@ -929,17 +896,16 @@ export default function Home() {
       buildRevisionPlanPrompt(docs, {
         matiere: [...matieres][0] || "la matière",
         targetDate: targetDate || "",
-      })
+      }),
     );
     setStudyToolLabel("plan-revision");
     setGbakiStatus("");
   }
 
-  /* ============ Pipeline OCR ============ */
   function buildBatches(allPages) {
     const batches = [];
-    let cur = [];
-    let curSize = 0;
+    let cur = [],
+      curSize = 0;
     for (const p of allPages) {
       if (p.kind === "text") {
         if (cur.length) {
@@ -967,7 +933,6 @@ export default function Home() {
 
   async function processFiles(files, opts = {}) {
     if (!files || files.length === 0) return null;
-
     const controller = new AbortController();
     abortRef.current = controller;
     setBusy(true);
@@ -976,12 +941,10 @@ export default function Home() {
     setProgress(0);
     count429.current = 0;
     setAutoVerifyDisabled(false);
-
     const singlePdf = files.length === 1 && files[0].type === "application/pdf";
     const pageRange = singlePdf ? opts.pageRange : undefined;
-
     try {
-      setStatus("On ouvre tes fichiers…");
+      setStatus("Ouverture du fichier…");
       let allPages = [];
       for (const f of files) {
         if (controller.signal.aborted)
@@ -992,8 +955,8 @@ export default function Home() {
                 onPage: (i, n, kind) =>
                   setStatus(
                     kind === "text"
-                      ? `Texte natif page ${i} (gratuit)`
-                      : `Préparation page ${i} de ${f.name}`
+                      ? `Page ${i} — texte natif`
+                      : `Préparation page ${i}…`,
                   ),
                 signal: controller.signal,
                 pageRange,
@@ -1001,88 +964,70 @@ export default function Home() {
             : await renderImage(f);
         allPages = allPages.concat(pages);
       }
-
       const imgs = allPages
         .filter((p) => p.kind === "image")
         .map((p) => p.dataUrl);
       setSourceImages(imgs);
-
       for (const p of allPages) {
         if (p.kind !== "image") continue;
         let guard = 0;
         while (p.dataUrl.length > MAX_PAYLOAD && guard < 3) {
-          setStatus(`Page ${p.index} un peu lourde — on l'allège…`);
+          setStatus(`Compression page ${p.index}…`);
           p.dataUrl = await shrinkImage(p.dataUrl);
           guard++;
         }
       }
-
       const batches = buildBatches(allPages);
       const total = allPages.length;
-      let pagesDone = 0;
-      let result = "";
-
+      let pagesDone = 0,
+        result = "";
       for (let b = 0; b < batches.length; b++) {
         if (controller.signal.aborted)
           throw new DOMException("Annulé", "AbortError");
         const batch = batches[b];
-
         let md;
         if (batch.kind === "text") {
           md = batch.page.text;
-          setStatus(`Page ${batch.page.index} prise en texte natif (gratuit).`);
+          setStatus(`Page ${batch.page.index} — texte natif.`);
           pagesDone += 1;
         } else {
           const from = batch.pages[0].index;
           const to = batch.pages[batch.pages.length - 1].index;
-          const verb = FRIENDLY_BATCH_LABELS[b % FRIENDLY_BATCH_LABELS.length];
           const span = from === to ? `page ${from}` : `pages ${from}–${to}`;
-          setStatus(`${verb} ${span}…`);
-
+          setStatus(`Transcription ${span}…`);
           md = await ocrWithRetry(
             { images: batch.pages.map((p) => p.dataUrl) },
-            controller.signal
+            controller.signal,
           );
-
           if (verifyPass && !autoVerifyDisabled) {
             await sleep(DELAY_MS, controller.signal);
             setStatus(`Relecture des formules ${span}…`);
             const verified = await ocrWithRetry(
               { images: batch.pages.map((p) => p.dataUrl), draft: md },
-              controller.signal
+              controller.signal,
             );
             if (verified.trim()) md = verified;
           }
           pagesDone += batch.pages.length;
         }
-
         result += (result ? "\n\n---\n\n" : "") + md.trim();
         setMarkdown(result);
         setProgress(pagesDone / total);
-
-        if (batch.kind === "ocr" && b < batches.length - 1) {
+        if (batch.kind === "ocr" && b < batches.length - 1)
           await sleep(DELAY_MS, controller.signal);
-        }
       }
-
       const txt = allPages.filter((p) => p.kind === "text").length;
       setStatus(
         txt > 0
-          ? `Terminé : ${total} page(s) — ${txt} en texte natif, ${total - txt} via OCR.`
-          : `Terminé : ${total} page(s). Relis les formules avant le prompt.`
+          ? `Terminé — ${total} page(s), ${txt} en texte natif.`
+          : `Terminé — ${total} page(s). Vérifie les formules avant de copier.`,
       );
       return { markdown: result, sourceImages: imgs };
     } catch (e) {
       const msg =
-        e?.name === "AbortError"
-          ? "Annulé"
-          : `Erreur : ${e.message || e}`;
+        e?.name === "AbortError" ? "Annulé." : `Erreur : ${e.message || e}`;
       lastErrorRef.current = msg;
-      setStatus(
-        e?.name === "AbortError"
-          ? "Annulé. Tu peux relancer quand tu veux."
-          : msg
-      );
+      setStatus(msg);
       return null;
     } finally {
       setBusy(false);
@@ -1092,76 +1037,66 @@ export default function Home() {
 
   async function ocrWithRetry(payload, signal, attemptNo = 0, engineIdx = 0) {
     if (signal?.aborted) throw new DOMException("Annulé", "AbortError");
-    if (engineIdx >= OCR_CHAIN.length) {
+    if (engineIdx >= OCR_CHAIN.length)
       throw new Error(
-        "Tous les moteurs OCR sont épuisés. Réessaie après la réinitialisation des quotas (~7h–8h) ou ajoute GROQ_API_KEY / OPENROUTER_API_KEY."
+        "Tous les moteurs sont saturés. Réessaie dans 1h ou configure ta clé personnelle.",
       );
-    }
     const engine = OCR_CHAIN[engineIdx];
-
     let r;
     try {
       r = await fetch("/api/ocr", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...userKeyHeaders(userKeys) },
+        headers: {
+          "Content-Type": "application/json",
+          ...userKeyHeaders(userKeys),
+        },
         body: JSON.stringify({ ...payload, engine }),
         signal,
       });
     } catch (e) {
       if (e?.name === "AbortError") throw e;
       if (attemptNo < 5) {
-        setStatus(`Connexion interrompue — nouvelle tentative dans 8 s (${attemptNo + 1}/5)…`);
+        setStatus(
+          `Connexion interrompue — nouvelle tentative (${attemptNo + 1}/5)…`,
+        );
         await sleep(8000, signal);
         return ocrWithRetry(payload, signal, attemptNo + 1, engineIdx);
       }
-      throw new Error("Échec réseau répété. Vérifie ta connexion et garde l'onglet ouvert.");
+      throw new Error("Échec réseau. Vérifie ta connexion.");
     }
-
     if (r.status === 501) {
-      // 501 = pas de clé (user ni shared). Suggère le BYOK.
       const info = await r.json().catch(() => ({}));
-      if (info.needsKey && engineIdx === 0) {
-        setSaturatedShared(true);
-      }
+      if (info.needsKey && engineIdx === 0) setSaturatedShared(true);
       return ocrWithRetry(payload, signal, 0, engineIdx + 1);
     }
-
     if (r.status === 429) {
       count429.current += 1;
-      // Si on est en mode partagé (pas de clé user Gemini) et qu'on prend des 429,
-      // c'est probablement la saturation collective. On surface le bandeau.
-      if (!userKeys.gemini && count429.current >= 2) {
-        setSaturatedShared(true);
-      }
-      if (count429.current >= 3 && verifyPass && !autoVerifyDisabled) {
+      if (!userKeys.gemini && count429.current >= 2) setSaturatedShared(true);
+      if (count429.current >= 3 && verifyPass && !autoVerifyDisabled)
         setAutoVerifyDisabled(true);
-      }
       const info = await r.json().catch(() => ({}));
       if (info.daily || attemptNo >= 3) {
-        setStatus(`Quota épuisé sur ${engine} — on passe au moteur suivant…`);
+        setStatus(`Quota atteint — passage au moteur suivant…`);
         await sleep(1500, signal);
         return ocrWithRetry(payload, signal, 0, engineIdx + 1);
       }
-      setStatus(`Quota minute atteint sur ${engine}, on attend 30 s (${attemptNo + 1}/3)…`);
+      setStatus(`Quota atteint — pause 30 s (${attemptNo + 1}/3)…`);
       await sleep(30000, signal);
       return ocrWithRetry(payload, signal, attemptNo + 1, engineIdx);
     }
-
     if (r.status === 503) {
       if (attemptNo >= 2) {
-        setStatus(`${engine} reste surchargé — passage au suivant…`);
+        setStatus(`Moteur surchargé — passage au suivant…`);
         await sleep(1500, signal);
         return ocrWithRetry(payload, signal, 0, engineIdx + 1);
       }
       const wait = 10000 * 2 ** attemptNo;
-      setStatus(`Serveurs ${engine} surchargés — on patiente ${wait / 1000} s (${attemptNo + 1}/3)…`);
+      setStatus(`Serveurs surchargés — pause ${wait / 1000} s…`);
       await sleep(wait, signal);
       return ocrWithRetry(payload, signal, attemptNo + 1, engineIdx);
     }
-
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `Erreur OCR (${r.status})`);
-    if (engineIdx > 0) setStatus(`Transcription via ${engine} (moteur de secours)…`);
+    if (!r.ok) throw new Error(data.error || `Erreur (${r.status})`);
     return data.markdown || "";
   }
 
@@ -1192,16 +1127,17 @@ export default function Home() {
       setCopied(tag);
       setTimeout(() => setCopied(""), 2500);
     } catch {
-      alert("Copie automatique indisponible — sélectionne le texte et fais Ctrl+C.");
+      alert("Copie indisponible — sélectionne le texte et fais Ctrl+C.");
     }
   }
 
   return (
     <main className="app">
+      {/* ── En-tête ── */}
       <header className="hero">
         <div className="hero-inner">
           <div className="hero-top">
-            <p className="tag">Corro AI · atelier de prép d&apos;exam</p>
+            <p className="tag">Corro AI</p>
             <div className="hero-top-actions">
               <button
                 type="button"
@@ -1212,8 +1148,8 @@ export default function Home() {
                 }}
                 title={
                   userKeys.gemini
-                    ? "Tu utilises ta clé personnelle — quota perso illimité par jour"
-                    : "Mode partagé — quotas mutualisés avec les autres utilisateurs"
+                    ? "Clé personnelle active — quota dédié"
+                    : "Mode partagé — quota mutualisé"
                 }
               >
                 <span className="mode-dot" />
@@ -1225,26 +1161,29 @@ export default function Home() {
                 onClick={() => setHelpOpen(true)}
                 aria-label="Comment ça marche"
               >
-                ? Comment ça marche
+                Comment ça marche ?
               </button>
             </div>
           </div>
+
           <h1>
-            Ta matière, prête à être <em>maîtrisée</em>.
+            Tes cours. Tes TDs.
+            <br />
+            Prêts à être <em>travaillés</em>.
           </h1>
           <p>
-            Drop d&apos;un dossier matière (Cours / TDs / Devoir) → transcription
-            en lot → outils d&apos;étude : analyse de prof, ranking de TDs, plan
-            de révision, quiz interactif, corrigés via DeepSeek/Claude.
+            Dépose un scan — même flou, même en photo. Corro le transcrit et
+            t&apos;aide à réviser.
           </p>
         </div>
       </header>
 
+      {/* ── Bandeau quota saturé ── */}
       {saturatedShared && !userKeys.gemini && (
         <div className="saturation-banner">
           <div className="saturation-inner">
-            <strong>L&apos;API partagée est saturée.</strong> Tu peux passer en{" "}
-            <strong>Mode perso</strong> (5 min de setup) pour avoir ton quota dédié.
+            <strong>Quota atteint.</strong> Ajoute ta clé gratuite pour
+            continuer sans attente.
             <button
               className="primary sm"
               onClick={() => {
@@ -1252,7 +1191,7 @@ export default function Home() {
                 setSettingsOpen(true);
               }}
             >
-              Configurer ma clé
+              Ajouter ma clé
             </button>
             <button
               className="ghost sm"
@@ -1264,6 +1203,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── Corps principal ── */}
       <div className="layout">
         <Sidebar
           baseItems={baseItems}
@@ -1360,6 +1300,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ── Modales ── */}
       {addModal && (
         <AddItemModal
           file={addModal.file}
@@ -1369,7 +1310,6 @@ export default function Home() {
           onConfirm={confirmAdd}
         />
       )}
-
       {editModal && (
         <EditItemModal
           item={editModal}
@@ -1379,7 +1319,6 @@ export default function Home() {
           onDelete={deleteFromEdit}
         />
       )}
-
       {batchModal && (
         <BatchImportModal
           parsed={batchModal}
@@ -1388,7 +1327,6 @@ export default function Home() {
           onConfirm={confirmBatch}
         />
       )}
-
       {batchSummary && (
         <BatchSummaryModal
           ok={batchSummary.ok}
@@ -1398,9 +1336,7 @@ export default function Home() {
           onRetry={retryBatchFailed}
         />
       )}
-
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
-
       {welcomeOpen && (
         <WelcomeModal
           onConfigure={async () => {
@@ -1415,25 +1351,22 @@ export default function Home() {
           }}
         />
       )}
-
       {settingsOpen && (
         <Settings
           focusProvider={settingsFocus}
           onClose={() => {
             setSettingsOpen(false);
             setSettingsFocus(null);
-            // Si on a une clé maintenant, on retire la saturation.
             reloadKeys().then(() => setSaturatedShared(false));
           }}
           onChange={reloadKeys}
         />
       )}
 
+      {/* ── Pied de page ── */}
       <footer>
-        Corro AI · base perso anonyme en IndexedDB · OCR Gemini / Groq / OpenRouter ·
-        prompts experts vers DeepSeek &amp; Claude. Quotas gratuits, sans CB.
-        Les paliers gratuits d&apos;OCR peuvent utiliser tes données pour
-        l&apos;entraînement : évite les documents sensibles.
+        Corro AI · Tes données restent dans ton navigateur. Gratuit. Sans
+        compte.
       </footer>
     </main>
   );
