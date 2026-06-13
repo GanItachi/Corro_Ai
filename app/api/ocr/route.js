@@ -156,12 +156,43 @@ export async function POST(req) {
       );
     }
 
-    const data = await r.json();
+    const raw = await r.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // Le moteur a renvoyé du texte brut — pas du JSON.
+      return Response.json(
+        { error: `Réponse inattendue de ${engine} : ${raw.slice(0, 200)}` },
+        { status: 502 }
+      );
+    }
+    
     const markdown =
       conf.kind === "gemini"
         ? data?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || ""
         : data?.choices?.[0]?.message?.content || "";
-
+    
+    // Gemini peut répondre 200 avec un champ error dans le body
+    if (data?.error) {
+      const msg = data.error?.message || JSON.stringify(data.error).slice(0, 200);
+      const daily = /quota|limit|exhausted/i.test(msg);
+      return Response.json(
+        { error: msg, daily, retry: !daily },
+        { status: daily ? 429 : 502 }
+      );
+    }
+    
+    if (!markdown.trim()) {
+      return Response.json(
+        {
+          error: `Aucun texte extrait par ${engine}.
+                  Le fichier est peut-être vide ou illisible.`
+        },
+        { status: 502 }
+      );
+    }
+    
     return Response.json({ markdown, engine, keySource });
   } catch (e) {
     return Response.json({ error: String(e?.message || e) }, { status: 500 });
