@@ -104,7 +104,86 @@ async function migrateLegacyCache(gbakiManifest) {
   return n;
 }
 
+// ─── Nav items ───────────────────────────────────────────────────────────────
+const NAV = [
+  { id: "home", label: "Accueil", icon: "◼️" },
+  { id: "library", label: "Bibliothèque", icon: "◼️" },
+  { id: "revise", label: "Réviser", icon: "◼️" },
+  { id: "analyze", label: "Analyse", icon: "◼️" },
+];
+
+// ─── Home action cards ────────────────────────────────────────────────────────
+function HomeActions({ onAction, hasItems }) {
+  const actions = [
+    {
+      id: "add",
+      icon: "📄",
+      label: "Ajouter un document",
+      desc: "Importe un cours, TD ou examen",
+      color: "#4F46E5",
+      bg: "#EEF2FF",
+    },
+    {
+      id: "quiz",
+      icon: "✏️",
+      label: "Faire un quiz",
+      desc: "Teste tes connaissances",
+      color: "#059669",
+      bg: "#ECFDF5",
+      disabled: !hasItems,
+    },
+    {
+      id: "plan",
+      icon: "📅",
+      label: "Plan de révision",
+      desc: "Organise ton travail",
+      color: "#D97706",
+      bg: "#FFFBEB",
+      disabled: !hasItems,
+    },
+    {
+      id: "analyze",
+      icon: "🔍",
+      label: "Analyser les examens",
+      desc: "Comprends ce que le prof veut",
+      color: "#7C3AED",
+      bg: "#F5F3FF",
+      disabled: !hasItems,
+    },
+  ];
+
+  return (
+    <div className="home-actions-grid">
+      {actions.map((a) => (
+        <button
+          key={a.id}
+          className={`action-card${a.disabled ? " action-card--disabled" : ""}`}
+          onClick={() => !a.disabled && onAction(a.id)}
+          style={{ "--accent": a.color, "--accent-bg": a.bg }}
+          title={a.disabled ? "Ajoute d'abord un document" : undefined}
+        >
+          <span className="action-card__icon">{a.icon}</span>
+          <span className="action-card__label">{a.label}</span>
+          <span className="action-card__desc">{a.desc}</span>
+          {a.disabled && (
+            <span
+              className="action-card__lock"
+              title="Ajoute un document d'abord"
+            >
+              🔒
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
+  // ── View state (new) ──────────────────────────────────────────────────────
+  const [view, setView] = useState("home");
+
+  // ── Existing state ────────────────────────────────────────────────────────
   const [subject, setSubject] = useState(
     "mathématiques avancées, statistiques et économie",
   );
@@ -230,6 +309,7 @@ export default function Home() {
     busy,
   ]);
 
+  // ── Helpers (unchanged) ───────────────────────────────────────────────────
   function toggleSel(sid) {
     setSel((s) => (s.includes(sid) ? s.filter((x) => x !== sid) : [...s, sid]));
   }
@@ -496,6 +576,8 @@ export default function Home() {
     setSourceImages(item.sourceImages || []);
     setProgress(1);
     setStatus(`« ${item.titre} » ouvert.`);
+    // Switch to document view
+    setView("document");
   }
 
   function editBaseItem(item) {
@@ -522,6 +604,7 @@ export default function Home() {
       setMarkdown("");
       setSourceImages([]);
       setStatus("");
+      if (view === "document") setView("library");
     }
     if (lastOpenedItemId === item.id) setLastOpenedItemId(null);
     setSel((s) => s.filter((sid) => sid !== `base:${item.id}`));
@@ -564,6 +647,7 @@ export default function Home() {
     setSourceImages([]);
     setProgress(0);
     setStatus("");
+    setView("library");
   }
 
   function importMd(text) {
@@ -666,6 +750,7 @@ export default function Home() {
     );
     setStudyToolLabel("analyse-prof");
     setGbakiStatus("");
+    setView("analyze");
   }
 
   async function rankTds(itemsArg) {
@@ -698,6 +783,7 @@ export default function Home() {
     );
     setStudyToolLabel("ranker-tds");
     setGbakiStatus("");
+    setView("analyze");
   }
 
   async function startQuiz(itemsArg) {
@@ -731,6 +817,7 @@ export default function Home() {
       status: "loading",
     };
     setQuiz(init);
+    setView("revise");
     const q = await quizQuestion({ cours: coursText, matiere, history: [] });
     if (q?.error || !q?.question) {
       setGbakiStatus(`Quiz indisponible : ${q?.error || "réponse invalide"}.`);
@@ -900,44 +987,37 @@ export default function Home() {
     );
     setStudyToolLabel("plan-revision");
     setGbakiStatus("");
+    setView("revise");
   }
 
   function buildBatches(allPages) {
-      const batches = [];
-      let cur = [],
-        curSize = 0;
-  
-      for (const p of allPages) {
-        if (p.kind === "text") {
-          if (cur.length) {
-            batches.push({ kind: "ocr", pages: cur });
-            cur = [];
-            curSize = 0;
-          }
-          batches.push({ kind: "text", page: p });
-          continue;
-        }
-  
-        // CALCUL SÉCURISÉ : On estime le poids de l'objet JSON global (images + structure)
-        // On convertit la limite Vercel de 4.5 Mo en sécurité stricte (~3.5 Mo max par lot)
-        const estimatedPageSize = p.dataUrl ? p.dataUrl.length : 0;
-  
-        if (
-          cur.length &&
-          (cur.length >= BATCH_SIZE || curSize + estimatedPageSize > 3_500_000)
-        ) {
+    const batches = [];
+    let cur = [],
+      curSize = 0;
+    for (const p of allPages) {
+      if (p.kind === "text") {
+        if (cur.length) {
           batches.push({ kind: "ocr", pages: cur });
           cur = [];
           curSize = 0;
         }
-        
-        cur.push(p);
-        curSize += estimatedPageSize;
+        batches.push({ kind: "text", page: p });
+        continue;
       }
-      
-      if (cur.length) batches.push({ kind: "ocr", pages: cur });
-      return batches;
+      if (
+        cur.length &&
+        (cur.length >= BATCH_SIZE || curSize + p.dataUrl.length > MAX_PAYLOAD)
+      ) {
+        batches.push({ kind: "ocr", pages: cur });
+        cur = [];
+        curSize = 0;
+      }
+      cur.push(p);
+      curSize += p.dataUrl.length;
     }
+    if (cur.length) batches.push({ kind: "ocr", pages: cur });
+    return batches;
+  }
 
   async function processFiles(files, opts = {}) {
     if (!files || files.length === 0) return null;
@@ -1139,61 +1219,89 @@ export default function Home() {
     }
   }
 
+  // ── Home action dispatch ───────────────────────────────────────────────────
+  function handleHomeAction(action) {
+    switch (action) {
+      case "add":
+        setView("library");
+        break;
+      case "quiz":
+        startQuiz();
+        break;
+      case "plan":
+        setView("revise");
+        break;
+      case "analyze":
+        setView("analyze");
+        break;
+    }
+  }
+
+  const hasTranscribedItems = baseItems.some((it) =>
+    (it.markdown || "").trim(),
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <main className="app">
-      {/* ── En-tête ── */}
-      <header className="hero">
-        <div className="hero-inner">
-          <div className="hero-top">
-            <p className="tag">Corro AI</p>
-            <div className="hero-top-actions">
-              <button
-                type="button"
-                className={`mode-btn ${userKeys.gemini ? "mode-perso" : "mode-shared"}`}
-                onClick={() => {
-                  setSettingsFocus(userKeys.gemini ? null : "gemini");
-                  setSettingsOpen(true);
-                }}
-                title={
-                  userKeys.gemini
-                    ? "Clé personnelle active — quota dédié"
-                    : "Mode partagé — quota mutualisé"
-                }
-              >
-                <span className="mode-dot" />
-                {userKeys.gemini ? "Mode perso" : "Mode partagé"}
-              </button>
-              <button
-                type="button"
-                className="help-btn"
-                onClick={() => setHelpOpen(true)}
-                aria-label="Comment ça marche"
-              >
-                Comment ça marche ?
-              </button>
-            </div>
-          </div>
-
-          <h1>
-            Tes cours, tes TDs,
-            <br />
-            prêts à être <em>travaillés</em>.
-          </h1>
-          <p>
-            Dépose un scan — même flou, même en photo. Corro AI le transcrit et
-            t&apos;aide à réviser.
-          </p>
+    <div className="app-shell">
+      {/* ── Left nav ──────────────────────────────────────────────────────── */}
+      <nav className="app-nav" aria-label="Navigation principale">
+        <div className="app-nav__logo">
+          <span className="app-nav__logo-mark">C</span>
+          <span className="app-nav__logo-text">Corro</span>
         </div>
-      </header>
 
-      {/* ── Bandeau quota saturé ── */}
-      {saturatedShared && !userKeys.gemini && (
-        <div className="saturation-banner">
-          <div className="saturation-inner">
+        <ul className="app-nav__items">
+          {NAV.map((n) => (
+            <li key={n.id}>
+              <button
+                className={`app-nav__item${view === n.id || (view === "document" && n.id === "library") ? " app-nav__item--active" : ""}`}
+                onClick={() => setView(n.id)}
+                aria-current={view === n.id ? "page" : undefined}
+              >
+                <span className="app-nav__item-icon" aria-hidden="true">
+                  {n.icon}
+                </span>
+                <span className="app-nav__item-label">{n.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        <div className="app-nav__footer">
+          <button
+            className="app-nav__item"
+            onClick={() => {
+              setSettingsFocus(userKeys.gemini ? null : "gemini");
+              setSettingsOpen(true);
+            }}
+          >
+            <span className="app-nav__item-icon" aria-hidden="true">
+              ⚙️
+            </span>
+            <span className="app-nav__item-label">Paramètres</span>
+            {!userKeys.gemini && (
+              <span className="app-nav__badge" title="Quota partagé actif" />
+            )}
+          </button>
+          <button className="app-nav__item" onClick={() => setHelpOpen(true)}>
+            <span className="app-nav__item-icon" aria-hidden="true">
+              ❓
+            </span>
+            <span className="app-nav__item-label">Aide</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* ── Main area ─────────────────────────────────────────────────────── */}
+      <div className="app-body">
+        {/* Quota saturation banner */}
+        {saturatedShared && !userKeys.gemini && (
+          <div className="saturation-banner" role="alert">
             <strong>Quota atteint.</strong> Ajoute ta clé gratuite pour
             continuer sans attente.
             <button
-              className="primary sm"
+              className="saturation-banner__cta"
               onClick={() => {
                 setSettingsFocus("gemini");
                 setSettingsOpen(true);
@@ -1202,113 +1310,268 @@ export default function Home() {
               Ajouter ma clé
             </button>
             <button
-              className="ghost sm"
+              className="saturation-banner__dismiss"
               onClick={() => setSaturatedShared(false)}
+              aria-label="Fermer"
             >
-              Plus tard
+              ✕
             </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── Corps principal ── */}
-      <div className="layout">
-        <Sidebar
-          baseItems={baseItems}
-          gbakiManifest={gbaki}
-          currentItemId={currentItemId}
-          selectedIds={sel}
-          onToggleSelect={toggleSel}
-          onOpenBase={openBaseItem}
-          onEditBase={editBaseItem}
-          onDeleteBase={deleteBaseItem}
-          onReocrBase={reocrBaseItem}
-          onOpenGbaki={openGbakiItem}
-          onExportBase={handleExport}
-          onImportBase={handleImport}
-          status={gbakiStatus}
-          busy={busy}
-        />
+        {/* ── VIEW: Home ─────────────────────────────────────────────────── */}
+        {view === "home" && (
+          <div className="view view--home">
+            <header className="view-header">
+              <p className="view-header__eyebrow">Corro AI</p>
+              <h1 className="view-header__title">
+                Tes cours, tes TDs.
+                <br />
+                <em>Prêts à être travaillés.</em>
+              </h1>
+              <p className="view-header__sub">
+                Dépose un scan — même flou, même en photo. CorroAI le transcrit
+                et t&apos;aide à réviser.
+              </p>
+            </header>
 
-        <div className="main">
-          <Dropzone
-            busy={busy}
-            status={status}
-            progress={progress}
-            verifyPass={verifyPass}
-            autoVerifyDisabled={autoVerifyDisabled}
-            batchProgress={batchProgress}
-            onFiles={handleFiles}
-            onFolderOrZip={handleFolderOrZip}
-            onCancel={cancelOcr}
-            onToggleVerify={setVerifyPass}
-          />
-
-          <ToolsPanel
-            baseItems={baseItems}
-            gbakiManifest={gbaki}
-            selectedIds={sel}
-            studyPrompt={studyPrompt}
-            studyToolLabel={studyToolLabel}
-            onClearSelection={clearSelection}
-            onAnalyzeProf={() => analyzeProf()}
-            onRankTds={() => rankTds()}
-            onPlanRevision={(date) => planRevision(date)}
-            onQuizCours={() => startQuiz()}
-            onCopy={copyText}
-            onDownload={download}
-            copiedTag={copied}
-            busy={busy}
-          />
-
-          {quiz ? (
-            <QuizPanel
-              quiz={quiz}
-              onSubmit={submitQuizAnswer}
-              onNext={nextQuizQuestion}
-              onRestart={restartQuiz}
-              onExit={exitQuiz}
-              onExport={exportQuizAsPrompt}
-            />
-          ) : markdown ? (
-            <>
-              <Workbench
-                markdown={markdown}
-                setMarkdown={setMarkdown}
-                sourceImages={sourceImages}
-                currentItem={currentItem}
-                onDownload={download}
-                onImportMd={importMd}
+            <section aria-label="Actions rapides">
+              <h2 className="section-label">Que veux-tu faire ?</h2>
+              <HomeActions
+                onAction={handleHomeAction}
+                hasItems={hasTranscribedItems}
               />
-              <CorrectionPanel
-                markdown={markdown}
-                subject={subject}
-                setSubject={setSubject}
-                attempt={attempt}
-                setAttempt={setAttempt}
+            </section>
+
+            {baseItems.length > 0 && (
+              <section aria-label="Tableau de bord" className="home-dashboard">
+                <h2 className="section-label">Tes matières</h2>
+                <Dashboard
+                  baseItems={baseItems}
+                  lastOpenedItemId={lastOpenedItemId}
+                  onMatiereAction={onMatiereAction}
+                  onOpenItem={(item) => openBaseItem(item)}
+                  busy={busy}
+                />
+              </section>
+            )}
+          </div>
+        )}
+
+        {/* ── VIEW: Library ──────────────────────────────────────────────── */}
+        {view === "library" && (
+          <div className="view view--library">
+            <header className="view-header view-header--compact">
+              <h1 className="view-header__title">Bibliothèque</h1>
+              <p className="view-header__sub">
+                Gère tes documents et importe de nouveaux fichiers.
+              </p>
+            </header>
+
+            <div className="library-layout">
+              <div className="library-sidebar">
+                <Sidebar
+                  baseItems={baseItems}
+                  gbakiManifest={gbaki}
+                  currentItemId={currentItemId}
+                  selectedIds={sel}
+                  onToggleSelect={toggleSel}
+                  onOpenBase={openBaseItem}
+                  onEditBase={editBaseItem}
+                  onDeleteBase={deleteBaseItem}
+                  onReocrBase={reocrBaseItem}
+                  onOpenGbaki={openGbakiItem}
+                  onExportBase={handleExport}
+                  onImportBase={handleImport}
+                  status={gbakiStatus}
+                  busy={busy}
+                />
+              </div>
+              <div className="library-drop">
+                <Dropzone
+                  busy={busy}
+                  status={status}
+                  progress={progress}
+                  verifyPass={verifyPass}
+                  autoVerifyDisabled={autoVerifyDisabled}
+                  batchProgress={batchProgress}
+                  onFiles={handleFiles}
+                  onFolderOrZip={handleFolderOrZip}
+                  onCancel={cancelOcr}
+                  onToggleVerify={setVerifyPass}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── VIEW: Document (full-screen when a doc is open) ────────────── */}
+        {view === "document" && markdown && (
+          <div className="view view--document">
+            <div className="document-topbar">
+              <button
+                className="document-back"
+                onClick={closeCurrent}
+                aria-label="Retour à la bibliothèque"
+              >
+                ← Bibliothèque
+              </button>
+              {currentItem && (
+                <span className="document-title">{currentItem.titre}</span>
+              )}
+            </div>
+            <Workbench
+              markdown={markdown}
+              setMarkdown={setMarkdown}
+              sourceImages={sourceImages}
+              currentItem={currentItem}
+              onDownload={download}
+              onImportMd={importMd}
+            />
+            <CorrectionPanel
+              markdown={markdown}
+              subject={subject}
+              setSubject={setSubject}
+              attempt={attempt}
+              setAttempt={setAttempt}
+              onCopy={copyText}
+              onDownload={download}
+              copiedTag={copied}
+            />
+          </div>
+        )}
+
+        {/* ── VIEW: Revise ───────────────────────────────────────────────── */}
+        {view === "revise" && (
+          <div className="view view--revise">
+            <header className="view-header view-header--compact">
+              <h1 className="view-header__title">Réviser</h1>
+              <p className="view-header__sub">
+                Quiz, plan de révision et exercices générés depuis tes cours.
+              </p>
+            </header>
+
+            {quiz ? (
+              <QuizPanel
+                quiz={quiz}
+                onSubmit={submitQuizAnswer}
+                onNext={nextQuizQuestion}
+                onRestart={restartQuiz}
+                onExit={exitQuiz}
+                onExport={exportQuizAsPrompt}
+              />
+            ) : (
+              <ToolsPanel
+                baseItems={baseItems}
+                gbakiManifest={gbaki}
+                selectedIds={sel}
+                studyPrompt={studyPrompt}
+                studyToolLabel={studyToolLabel}
+                onClearSelection={clearSelection}
+                onAnalyzeProf={() => analyzeProf()}
+                onRankTds={() => rankTds()}
+                onPlanRevision={(date) => planRevision(date)}
+                onQuizCours={() => startQuiz()}
                 onCopy={copyText}
                 onDownload={download}
                 copiedTag={copied}
+                busy={busy}
+                reviseOnly
               />
-              <div className="reset-row">
-                <button className="ghost" onClick={closeCurrent}>
-                  Fermer ce document
-                </button>
+            )}
+          </div>
+        )}
+
+        {/* ── VIEW: Analyze ─────────────────────────────────────────────── */}
+        {view === "analyze" && (
+          <div className="view view--analyze">
+            <header className="view-header view-header--compact">
+              <h1 className="view-header__title">Analyse</h1>
+              <p className="view-header__sub">
+                Comprends les habitudes du prof et priorise tes TDs.
+              </p>
+            </header>
+
+            {gbakiStatus && (
+              <p className="inline-status" role="status">
+                {gbakiStatus}
+              </p>
+            )}
+
+            <div className="analyze-actions">
+              <div className="analyze-card">
+                <div className="analyze-card__icon">🔍</div>
+                <div className="analyze-card__body">
+                  <h3 className="analyze-card__title">Analyse du prof</h3>
+                  <p className="analyze-card__desc">
+                    Identifie les thèmes récurrents dans les examens passés pour
+                    anticiper les questions.
+                  </p>
+                  <p className="analyze-card__hint">
+                    Sélectionne au moins 2 examens de la même matière dans la
+                    bibliothèque.
+                  </p>
+                  <button
+                    className="analyze-card__btn"
+                    onClick={() => analyzeProf()}
+                    disabled={busy}
+                  >
+                    Lancer l'analyse
+                  </button>
+                </div>
               </div>
-            </>
-          ) : (
-            <Dashboard
-              baseItems={baseItems}
-              lastOpenedItemId={lastOpenedItemId}
-              onMatiereAction={onMatiereAction}
-              onOpenItem={openBaseItem}
-              busy={busy}
-            />
-          )}
-        </div>
+
+              <div className="analyze-card">
+                <div className="analyze-card__icon">📋</div>
+                <div className="analyze-card__body">
+                  <h3 className="analyze-card__title">Classement des TDs</h3>
+                  <p className="analyze-card__desc">
+                    Classe tes TDs par importance selon leur probabilité
+                    d'apparaître à l'examen.
+                  </p>
+                  <p className="analyze-card__hint">
+                    Sélectionne au moins 1 TD et 1 examen de la même matière.
+                  </p>
+                  <button
+                    className="analyze-card__btn"
+                    onClick={() => rankTds()}
+                    disabled={busy}
+                  >
+                    Classer les TDs
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Result area from ToolsPanel — show if a prompt was generated */}
+            {studyPrompt &&
+              (studyToolLabel === "analyse-prof" ||
+                studyToolLabel === "ranker-tds") && (
+                <div className="analyze-result">
+                  <ToolsPanel
+                    baseItems={baseItems}
+                    gbakiManifest={gbaki}
+                    selectedIds={sel}
+                    studyPrompt={studyPrompt}
+                    studyToolLabel={studyToolLabel}
+                    onClearSelection={clearSelection}
+                    onAnalyzeProf={() => analyzeProf()}
+                    onRankTds={() => rankTds()}
+                    onPlanRevision={(date) => planRevision(date)}
+                    onQuizCours={() => startQuiz()}
+                    onCopy={copyText}
+                    onDownload={download}
+                    copiedTag={copied}
+                    busy={busy}
+                    analyzeOnly
+                  />
+                </div>
+              )}
+          </div>
+        )}
       </div>
 
-      {/* ── Modales ── */}
+      {/* ── Modales (inchangées) ───────────────────────────────────────────── */}
       {addModal && (
         <AddItemModal
           file={addModal.file}
@@ -1370,12 +1633,6 @@ export default function Home() {
           onChange={reloadKeys}
         />
       )}
-
-      {/* ── Pied de page ── */}
-      <footer>
-        Corro AI · Tes données restent dans ton navigateur. Gratuit. Sans
-        compte.
-      </footer>
-    </main>
+    </div>
   );
 }
