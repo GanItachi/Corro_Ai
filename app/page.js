@@ -1175,12 +1175,12 @@ export default function Home() {
           </div>
 
           <h1>
-            Tes cours. Tes TDs.
+            Tes cours, tes TDs,
             <br />
-            Prêts à être <em>travaillés</em>.
+            prêts à être <em>travaillés</em>.
           </h1>
           <p>
-            Dépose un scan — même flou, même en photo. Corro le transcrit et
+            Dépose un scan — même flou, même en photo. Corro AI le transcrit et
             t&apos;aide à réviser.
           </p>
         </div>
